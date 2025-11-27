@@ -1,0 +1,33 @@
+# Render Blueprint for WebRTC Signaling Server
+# This file defines the infrastructure for the application.
+
+services:
+  # Defines a Web Service that handles HTTP and WebSocket traffic.
+  - type: web
+    name: webrtc-signaling-server
+    # Location of the code repository (e.g., your GitHub repo name)
+    # The blueprint automatically pulls the code from the connected repository.
+    repo: https://github.com/yourusername/webrtc-live-stream-app  # <<-- UPDATE THIS LINE
+    
+    # Branch to deploy from
+    branch: main
+    
+    # Runtime environment required
+    runtime: node
+    
+    # Command to install dependencies
+    buildCommand: npm install
+    
+    # Command to start the application (references the main script)
+    startCommand: node server.js
+    
+    # The environment uses port 80 for public traffic, which Render maps to 
+    # the internal port used by 'server.js' (process.env.PORT).
+    port: 8080
+    
+    # The application is publicly accessible
+    # Set to 'false' if you want a private service.
+    public: true
+    
+    # Basic health check to ensure the service is running
+    healthCheckPath: /

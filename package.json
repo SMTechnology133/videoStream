@@ -1,0 +1,15 @@
+{
+  "name": "webrtc-live-stream-app",
+  "version": "1.0.0",
+  "description": "A full-stack WebRTC live video streaming application using Node.js and WebSockets for signaling.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.0"
+  },
+  "author": "",
+  "license": "ISC"
+}
