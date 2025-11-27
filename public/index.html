@@ -1,1 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Live Stream Client</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+        }
+        .video-feed {
+            width: 100%;
+            height: 100%;
+            background-color: #1f2937; /* Dark background for video */
+            border-radius: 0.75rem;
+            object-fit: cover;
+            /* Default mirror for local/selfie view */
+            transform: scaleX(-1);
+        }
+        /* Style for remote stream - no mirroring */
+        #remoteVideo {
+            transform: scaleX(1);
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+    <div class="max-w-4xl mx-auto">
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">Full Stack Live Stream</h1>
+            <p id="userIdDisplay" class="text-sm text-gray-500">Your ID: Connecting...</p>
+            <p id="broadcasterStatus" class="mt-1 font-medium text-blue-600">Status: Waiting for Broadcaster.</p>
+            <p class="text-xs mt-2 text-red-500">Note: Connection attempts are simulated P2P connections to the active broadcaster.</p>
+        </header>
 
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <!-- Local Stream (Broadcaster's View) -->
+            <div class="bg-white p-4 rounded-xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-3 text-gray-700">Your Camera (Broadcaster Source)</h2>
+                <div class="video-container shadow-xl">
+                    <video id="localVideo" class="video-feed" autoplay playsinline muted></video>
+                </div>
+                <div class="flex space-x-2 mt-4">
+                    <button id="startStreamBtn" onclick="startLocalStream()" class="flex-1 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition duration-150 shadow-md">
+                        <span id="startText">Start Broadcast</span>
+                    </button>
+                    <button id="stopStreamBtn" onclick="stopLocalStream()" class="flex-1 px-4 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition duration-150 shadow-md" disabled>
+                        Stop Broadcast
+                    </button>
+                </div>
+                <div class="mt-3 flex justify-between items-center">
+                    <label class="inline-flex items-center">
+                        <input type="checkbox" id="frontCameraToggle" checked class="form-checkbox h-4 w-4 text-indigo-600 rounded">
+                        <span class="ml-2 text-gray-700 text-sm">Use Front Camera</span>
+                    </label>
+                    <button id="connectBtn" onclick="requestConnectAsViewer()" class="px-3 py-1 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition duration-150 shadow-md" disabled>
+                        Connect as Viewer
+                    </button>
+                </div>
+            </div>
+
+            <!-- Remote Stream (Viewer's View) -->
+            <div class="bg-white p-4 rounded-xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-3 text-gray-700">Remote Broadcast Feed</h2>
+                <div class="video-container shadow-xl">
+                    <video id="remoteVideo" class="video-feed" autoplay playsinline></video>
+                    <p id="remoteStatus" class="absolute inset-0 flex items-center justify-center text-white text-lg font-bold bg-black bg-opacity-50 rounded-xl">
+                        Awaiting Stream...
+                    </p>
+                </div>
+                <div id="viewerControls" class="mt-4 text-center">
+                    <!-- Dynamic connection status/reconnect button here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Signaling/Status Console -->
+        <div class="bg-white p-4 rounded-xl shadow-lg mt-6">
+            <h3 class="text-lg font-semibold mb-2 text-gray-700">System Console</h3>
+            <div id="statusConsole" class="bg-gray-100 p-3 rounded-lg text-sm h-32 overflow-y-scroll space-y-1">
+                <p class="text-gray-500">[System]: Connecting to signaling server...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global State
+        let localStream = null;
+        let pc = null; // RTCPeerConnection instance
+        let ws = null; // WebSocket instance
+        let userId = null;
+        let isBroadcasting = false;
+        let activeBroadcasterId = null;
+
+        // DOM Elements
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const remoteStatus = document.getElementById('remoteStatus');
+        const consoleEl = document.getElementById('statusConsole');
+        const startBtn = document.getElementById('startStreamBtn');
+        const stopBtn = document.getElementById('stopStreamBtn');
+        const connectBtn = document.getElementById('connectBtn');
+        const startText = document.getElementById('startText');
+        const cameraToggle = document.getElementById('frontCameraToggle');
+        const userIdDisplay = document.getElementById('userIdDisplay');
+        const broadcasterStatus = document.getElementById('broadcasterStatus');
+
+        // Signaling Server URL (connects back to the Node.js server)
+        const WS_URL = window.location.protocol === 'https:' ? 'wss://' : 'ws://' +- window.location.host;
+
+        // STUN servers help peers find each other's public IP address
+        const PEER_CONFIG = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+
+        // --- UTILITY FUNCTIONS ---
+
+        function log(message, type = 'info') {
+            const p = document.createElement('p');
+            p.textContent = `[${new Date().toLocaleTimeString()}]: ${message}`;
+            p.classList.add('p-1', 'rounded', 'text-xs', {
+                'text-gray-700': type === 'info',
+                'bg-yellow-100 text-yellow-800': type === 'warning',
+                'bg-red-100 text-red-800': type === 'error',
+                'bg-green-100 text-green-800': type === 'success',
+            }[type] || 'text-gray-700');
+            consoleEl.appendChild(p);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        function updateBroadcasterStatus(status, color) {
+            broadcasterStatus.textContent = `Status: ${status}`;
+            broadcasterStatus.className = `mt-1 font-medium text-${color}-600`;
+        }
+        
+        // --- 1. WEBSOCKET SIGNALING ---
+
+        function connectSignalingServer() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                log("Connected to Signaling Server.", 'success');
+            };
+
+            ws.onerror = (error) => {
+                log(`Signaling error: ${error.message}`, 'error');
+            };
+
+            ws.onclose = () => {
+                log("Signaling connection closed. Attempting reconnect in 5s...", 'warning');
+                setTimeout(connectSignalingServer, 5000); // Simple auto-reconnect
+            };
+
+            ws.onmessage = handleSignalingMessage;
+        }
+
+        function sendSignal(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(message));
+            } else {
+                log("Cannot send signal: WebSocket connection not open.", 'warning');
+            }
+        }
+
+        function handleSignalingMessage(event) {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'id') {
+                userId = data.id;
+                userIdDisplay.textContent = `Your ID: ${userId}`;
+                log(`Received user ID: ${userId}`, 'info');
+                return;
+            }
+            
+            if (data.type === 'broadcaster_online' || data.type === 'broadcaster_started') {
+                activeBroadcasterId = data.broadcasterId;
+                updateBroadcasterStatus(`Broadcaster ${activeBroadcasterId} is active.`, 'green');
+                connectBtn.disabled = false;
+                log(`Broadcaster ${activeBroadcasterId} is now online.`, 'info');
+                return;
+            }
+
+            if (data.type === 'broadcaster_ended') {
+                activeBroadcasterId = null;
+                updateBroadcasterStatus(`No active broadcast.`, 'red');
+                connectBtn.disabled = true;
+                stopPeerConnection();
+                remoteVideo.srcObject = null;
+                remoteStatus.textContent = 'Awaiting Stream...';
+                log("The active broadcaster has disconnected.", 'info');
+                return;
+            }
+            
+            if (data.type === 'error') {
+                log(`Server Error: ${data.message}`, 'error');
+                return;
+            }
+
+            // All other messages are WebRTC related (offer, answer, candidate)
+            if (isBroadcasting) {
+                // Broadcaster receives ANSWER and CANDIDATES
+                if (data.type === 'answer') {
+                    // This is an Answer from a Viewer
+                    log(`Received Answer from Viewer ${data.senderId}`, 'info');
+                    if (pc && pc.signalingState !== 'stable') {
+                        pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+                          .then(() => log("Remote Answer set successfully.", 'success'))
+                          .catch(e => log(`Error setting remote answer: ${e.message}`, 'error'));
+                    }
+                } else if (data.type === 'candidate' && data.senderId !== userId) {
+                    // ICE Candidate from a Viewer
+                    if (pc) {
+                         pc.addIceCandidate(new RTCIceCandidate(data.candidate))
+                            .then(() => log("Added remote ICE Candidate (Viewer).", 'info'))
+                            .catch(e => log(`Error adding remote ICE candidate: ${e.message}`, 'error'));
+                    }
+                }
+
+            } else { 
+                // Viewer receives OFFER and CANDIDATES
+                if (data.type === 'offer') {
+                    // This is an Offer from the Broadcaster
+                    log(`Received Offer from Broadcaster ${data.senderId}.`, 'info');
+                    activeBroadcasterId = data.senderId; // Ensure we know who to answer
+                    // We must start stream and create peer connection if we haven't already
+                    if (!localStream) {
+                        startLocalStream(false, true).then(() => createAnswer(data.sdp, data.senderId));
+                    } else {
+                        createAnswer(data.sdp, data.senderId);
+                    }
+                    
+                } else if (data.type === 'candidate' && data.senderId !== userId) {
+                    // ICE Candidate from Broadcaster
+                    if (pc) {
+                         pc.addIceCandidate(new RTCIceCandidate(data.candidate))
+                            .then(() => log("Added remote ICE Candidate (Broadcaster).", 'info'))
+                            .catch(e => log(`Error adding remote ICE candidate: ${e.message}`, 'error'));
+                    }
+                }
+            }
+        }
+
+        // --- 2. LOCAL MEDIA ---
+        
+        /**
+         * Starts the local camera and microphone stream.
+         * @param {boolean} [asBroadcaster=true] - If true, initiates broadcast mode.
+         * @param {boolean} [silent=false] - If true, suppresses logs (used for viewer auto-start).
+         */
+        async function startLocalStream(asBroadcaster = true, silent = false) {
+            if (!silent) log(`Attempting to access camera as ${asBroadcaster ? 'Broadcaster' : 'Viewer'}...`, 'info');
+            
+            const isFront = cameraToggle.checked;
+            const constraints = {
+                video: { facingMode: isFront ? "user" : "environment" },
+                audio: true
+            };
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                localVideo.srcObject = localStream;
+                localVideo.style.transform = isFront ? 'scaleX(-1)' : 'scaleX(1)';
+                
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                startText.textContent = isBroadcasting ? "Broadcasting..." : "Camera Active";
+
+                if (asBroadcaster) {
+                    isBroadcasting = true;
+                    // Send signal to the server that this client is the broadcaster
+                    sendSignal({ type: 'start_broadcast' });
+                    updateBroadcasterStatus("YOU ARE BROADCASTING", 'green');
+                }
+                
+                // Set up the RTCPeerConnection
+                initPeerConnection(isBroadcasting);
+                
+                // If broadcasting, immediately create the first offer
+                if (isBroadcasting) {
+                    // The broadcaster won't create an offer until a viewer requests a connection.
+                    // This is handled in requestConnectAsViewer().
+                }
+                
+                if (!silent) log("Local stream active.", 'success');
+
+            } catch (error) {
+                log(`Error accessing media: ${error.name} - ${error.message}. Check permissions.`, 'error');
+                console.error("Media Error:", error);
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+        }
+
+        function stopLocalStream() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            localVideo.srcObject = null;
+            remoteVideo.srcObject = null;
+            isBroadcasting = false;
+            
+            // Notify server if this user was the broadcaster
+            if (activeBroadcasterId === userId) {
+                sendSignal({ type: 'stop_broadcast' });
+                activeBroadcasterId = null;
+                updateBroadcasterStatus("No active broadcast.", 'red');
+            }
+            
+            stopPeerConnection();
+            
+            log("Stream and Peer Connection stopped.", 'info');
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            startText.textContent = "Start Broadcast";
+            connectBtn.disabled = (activeBroadcasterId === null);
+        }
+
+        // --- 3. WEBRTC PEER CONNECTION LOGIC ---
+
+        function initPeerConnection(isInitiator) {
+            if (pc) return; 
+
+            pc = new RTCPeerConnection(PEER_CONFIG);
+            log("RTCPeerConnection initialized.", 'info');
+
+            // 1. Add tracks from local camera to the peer connection
+            if (localStream) {
+                 localStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localStream);
+                });
+            }
+
+            // 2. Listener for when remote tracks are received (the video/audio from the other peer)
+            pc.ontrack = (event) => {
+                if (remoteVideo.srcObject !== event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                    remoteStatus.textContent = '';
+                    log("Remote stream received and displayed!", 'success');
+                }
+            };
+            
+            // 3. Listener for ICE candidates (network negotiation packets)
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    // Send candidate to the remote peer via the Signaling Server
+                    sendSignal({
+                        type: 'candidate',
+                        candidate: event.candidate,
+                        // If Broadcaster, target is the Viewer we are currently connecting to.
+                        // If Viewer, target is the Broadcaster.
+                        targetId: isBroadcasting ? pc.viewerId : activeBroadcasterId, 
+                    });
+                }
+            };
+
+            // 4. Connection state logging
+            pc.oniceconnectionstatechange = () => {
+                log(`ICE Connection State: ${pc.iceConnectionState}`, 'info');
+                if (pc.iceConnectionState === 'connected') {
+                    log("WebRTC Connection Established!", 'success');
+                }
+            };
+        }
+
+        function stopPeerConnection() {
+            if (pc) {
+                pc.close();
+                pc = null;
+                log("RTCPeerConnection closed.", 'info');
+            }
+        }
+        
+        // --- 4. OFFER/ANSWER EXCHANGE ---
+
+        // Called by a Broadcaster when a Viewer requests a connection
+        async function createOffer(targetViewerId) {
+            if (!pc) initPeerConnection(true);
+
+            // Store the viewer ID for ICE candidate targeting
+            pc.viewerId = targetViewerId; 
+            
+            try {
+                log(`Creating SDP Offer for Viewer ${targetViewerId}...`, 'info');
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                // Send the offer to the signaling server, targeting the viewer
+                sendSignal({
+                    type: 'offer',
+                    sdp: pc.localDescription,
+                    targetId: targetViewerId
+                });
+                
+                log("Offer sent. Waiting for Answer...", 'info');
+            } catch (e) {
+                log(`Error creating offer: ${e.message}`, 'error');
+                console.error("Offer Error:", e);
+            }
+        }
+
+        // Called by a Viewer upon receiving an Offer
+        async function createAnswer(offerSdp, broadcasterId) {
+            if (!pc) initPeerConnection(false);
+
+            try {
+                // 1. Set the remote description (the offer received from the broadcaster)
+                await pc.setRemoteDescription(new RTCSessionDescription(offerSdp));
+                log("Received Offer. Creating Answer...", 'info');
+
+                // 2. Create the answer
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                // 3. Send the answer back to the broadcaster via the Signaling Server
+                sendSignal({
+                    type: 'answer',
+                    sdp: pc.localDescription,
+                    targetId: broadcasterId
+                });
+                
+                log("Answer sent to Broadcaster.", 'info');
+                connectBtn.disabled = true; // Disable until we need to connect to a new stream
+            } catch (e) {
+                log(`Error creating answer: ${e.message}`, 'error');
+                console.error("Answer Error:", e);
+            }
+        }
+
+        // --- 5. UI INTERACTIONS ---
+
+        // Viewer clicks "Connect as Viewer" button
+        window.requestConnectAsViewer = () => {
+            if (!activeBroadcasterId) {
+                return log("No broadcaster is currently online.", 'warning');
+            }
+            if (isBroadcasting) {
+                return log("You are already the broadcaster.", 'warning');
+            }
+            
+            // 1. Start camera as a viewer (needed to provide tracks for the connection)
+            startLocalStream(false).then(() => {
+                log(`Requesting connection to Broadcaster ${activeBroadcasterId}...`, 'info');
+                // 2. Send a custom signal to the server to request an offer
+                sendSignal({ 
+                    type: 'request_offer', 
+                    targetId: activeBroadcasterId 
+                });
+                // NOTE: The server.js is simplified and automatically sends the offer 
+                // to the viewer upon receiving their WebSocket connection if a broadcaster is active.
+                // In this full-stack setup, the viewer just waits for the offer.
+                log("Waiting for Offer from Broadcaster...", 'info');
+            });
+        }
+        
+        // Broadcaster clicks "Start Broadcast"
+        window.startBroadcast = () => {
+            if (localStream) {
+                stopLocalStream();
+            }
+            startLocalStream(true);
+        }
+
+
+        // --- 6. INITIALIZATION ---
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Expose global functions to window for onclick handlers
+            window.startLocalStream = startBroadcast;
+            window.stopLocalStream = stopLocalStream;
+            
+            // Initial WebSocket connection
+            connectSignalingServer();
+        });
+    </script>
+</body>
+</html>
