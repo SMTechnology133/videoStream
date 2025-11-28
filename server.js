@@ -2,7 +2,6 @@
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
-const path = require("path");
 const crypto = require("crypto");
 
 const app = express();
@@ -11,106 +10,82 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 8080;
 
-// Serve static files (index.html MUST be in same folder)
 app.use(express.static(__dirname));
 
-app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "index.html"));
-});
+let users = new Map();        // userId → { ws, name }
+let broadcasterId = null;
 
-// =========================
-//   WEBRTC SIGNALING SERVER
-// =========================
+function broadcastToAll(msg) {
+    users.forEach(u => u.ws.send(JSON.stringify(msg)));
+}
 
-const clients = new Map();     // userId → ws
-let broadcasterId = null;      // only ONE broadcaster allowed
+function updateBroadcasterList() {
+    const list = [];
+
+    if (broadcasterId) {
+        list.push({
+            id: broadcasterId,
+            name: users.get(broadcasterId)?.name || "Unknown"
+        });
+    }
+
+    broadcastToAll({
+        type: "broadcaster_list",
+        list
+    });
+}
 
 wss.on("connection", (ws) => {
     const userId = crypto.randomUUID();
-    clients.set(userId, ws);
+    users.set(userId, { ws, name: null });
 
-    // Send user their system ID
     ws.send(JSON.stringify({ type: "id", id: userId }));
 
-    // If a broadcaster already exists, notify new client
-    if (broadcasterId) {
-        ws.send(JSON.stringify({
-            type: "broadcaster_started",
-            broadcasterId
-        }));
-    }
+    if (broadcasterId) updateBroadcasterList();
 
     ws.on("message", (msg) => {
-        let data;
-        try {
-            data = JSON.parse(msg);
-        } catch (e) {
-            return;
-        }
+        const data = JSON.parse(msg);
 
         switch (data.type) {
+            case "set_name":
+                users.get(userId).name = data.name;
+                updateBroadcasterList();
+                break;
 
-            // ======================
-            // BROADCASTER STARTS
-            // ======================
             case "start_broadcast":
-                if (!broadcasterId) {
-                    broadcasterId = userId;
-
-                    clients.forEach((client, id) => {
-                        if (id !== userId) {
-                            client.send(JSON.stringify({
-                                type: "broadcaster_started",
-                                broadcasterId,
-                                name: data.name
-                            }));
-                        }
-                    });
-                } else {
-                    ws.send(JSON.stringify({
-                        type: "error",
-                        message: "A broadcaster is already active."
-                    }));
-                }
+                broadcasterId = userId;
+                broadcastToAll({
+                    type: "broadcaster_started",
+                    broadcasterId: userId,
+                    broadcasterName: users.get(userId).name
+                });
+                updateBroadcasterList();
                 break;
 
-            // ======================
-            // BROADCASTER ENDS
-            // ======================
             case "stop_broadcast":
-                if (userId === broadcasterId) {
-                    broadcasterId = null;
-
-                    clients.forEach((client) => {
-                        client.send(JSON.stringify({ type: "broadcaster_ended" }));
-                    });
-                }
+                broadcasterId = null;
+                broadcastToAll({ type: "broadcaster_ended" });
+                updateBroadcasterList();
                 break;
 
-            // ======================
-            // VIEWER REQUESTS OFFER
-            // ======================
             case "request_offer":
                 if (broadcasterId) {
-                    const host = clients.get(broadcasterId);
+                    const host = users.get(broadcasterId)?.ws;
                     if (host) {
                         host.send(JSON.stringify({
                             type: "request_offer",
-                            viewerId: data.viewerId
+                            viewerId: userId
                         }));
                     }
                 }
                 break;
 
-            // ======================
-            // OFFER / ANSWER / ICE
-            // ======================
             case "offer":
             case "answer":
             case "candidate": {
-                const target = clients.get(data.targetId);
-                if (target) {
-                    target.send(JSON.stringify({
+                const targetUser = users.get(data.targetId);
+                if (targetUser) {
+                    targetUser.ws.send(JSON.stringify({
                         type: data.type,
                         sdp: data.sdp,
                         candidate: data.candidate,
@@ -123,19 +98,17 @@ wss.on("connection", (ws) => {
     });
 
     ws.on("close", () => {
-        clients.delete(userId);
+        users.delete(userId);
 
-        // If broadcaster disconnects → reset everything
         if (userId === broadcasterId) {
             broadcasterId = null;
-
-            clients.forEach((client) => {
-                client.send(JSON.stringify({ type: "broadcaster_ended" }));
-            });
+            broadcastToAll({ type: "broadcaster_ended" });
         }
+
+        updateBroadcasterList();
     });
 });
 
 server.listen(PORT, () => {
-    console.log("✅ Server running on port " + PORT);
+    console.log("Server running on port " + PORT);
 });
