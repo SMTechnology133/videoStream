@@ -216,7 +216,13 @@
                 <p id="remoteStatus">Awaiting Stream...</p>
             </div>
         </div>
-    </div>
+    </div><br>
+    
+    <button onclick="toggleBroadcasterList()">Show Broadcasters ▼</button>
+
+<div id="broadcasterList" style="display:none; background:white; color:black; padding:10px; margin:10px; border-radius:6px; border:1px solid orange;">
+    Loading…
+</div>
 
     <!-- SYSTEM CONSOLE -->
     <div class="card" style="margin-top:20px;">
@@ -243,7 +249,8 @@ let localStream = null;
 let userId = null;
 let username = null;
 let activeBroadcasterId = null;
-let isBroadcasting = false;
+let activeBroadcasterName = null;
+let broadcasters = []; // list of all broadcasters
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
@@ -253,10 +260,10 @@ const consoleEl = document.getElementById("statusConsole");
 const startBtn = document.getElementById("startStreamBtn");
 const stopBtn = document.getElementById("stopStreamBtn");
 const connectBtn = document.getElementById("connectBtn");
-const userIdDisplay = document.getElementById("userIdDisplay");
-const broadcasterStatus = document.getElementById("broadcasterStatus");
 
 const cameraToggle = document.getElementById("frontCameraToggle");
+const userIdDisplay = document.getElementById("userIdDisplay");
+const broadcasterStatus = document.getElementById("broadcasterStatus");
 
 const PEER_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
@@ -270,11 +277,13 @@ function log(msg) {
 function connectSignalingServer() {
     ws = new WebSocket(WS_URL);
 
-    ws.onopen = () => log("Connected to signaling server.");
+    ws.onopen = () => log("Connected to server.");
+
     ws.onmessage = handleSignalMessage;
+
     ws.onclose = () => {
-        log("Disconnected. Reconnecting...");
-        setTimeout(connectSignalingServer, 2000);
+        log("Disconnected—Reconnecting…");
+        setTimeout(connectSignalingServer, 1500);
     };
 }
 
@@ -285,28 +294,52 @@ function send(msg) {
 function handleSignalMessage(event) {
     const data = JSON.parse(event.data);
 
+    // Receive assigned user ID
     if (data.type === "id") {
         userId = data.id;
-        userIdDisplay.textContent = "Your ID: " + username;
+
+        // Send real chosen name to server
+        username = prompt("Enter your Display Name:", "User") || "User";
+
+        send({ type: "set_name", name: username });
+
+        userIdDisplay.textContent = "Logged in as: " + username;
         return;
     }
 
+    // Receive list of all broadcasters
+    if (data.type === "broadcaster_list") {
+        broadcasters = data.list;
+        updateBroadcasterList();
+        return;
+    }
+
+    // A broadcaster starts
     if (data.type === "broadcaster_started") {
         activeBroadcasterId = data.broadcasterId;
-        broadcasterStatus.textContent = "Broadcaster online: " + data.broadcasterId;
+        activeBroadcasterName = data.broadcasterName;
+
+        broadcasterStatus.textContent =
+            "Broadcaster Online: " + activeBroadcasterName;
+
         connectBtn.disabled = false;
         return;
     }
 
+    // Broadcaster ends
     if (data.type === "broadcaster_ended") {
         activeBroadcasterId = null;
+        activeBroadcasterName = null;
+
         broadcasterStatus.textContent = "No active broadcaster.";
         connectBtn.disabled = true;
+
         remoteVideo.srcObject = null;
         remoteStatus.textContent = "Awaiting Stream...";
         return;
     }
 
+    // Viewer → broadcaster request
     if (data.type === "request_offer") {
         if (isBroadcasting) {
             createOffer(data.viewerId);
@@ -314,22 +347,25 @@ function handleSignalMessage(event) {
         return;
     }
 
+    // Broadcaster → viewer
     if (data.type === "offer") {
         startLocalStream(false).then(() => createAnswer(data.sdp, data.senderId));
+        return;
     }
 
+    // Viewer → broadcaster
     if (data.type === "answer") {
         pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        return;
     }
 
+    // ICE candidates
     if (data.type === "candidate") {
         if (pc) pc.addIceCandidate(new RTCIceCandidate(data.candidate));
     }
 }
 
 async function startLocalStream(isBroadcaster = false) {
-    username = prompt("Enter your Name:", "User") || "Anonymous";
-
     startBtn.disabled = true;
     stopBtn.disabled = false;
 
@@ -354,7 +390,6 @@ async function startLocalStream(isBroadcaster = false) {
 function stopLocalStream() {
     stopBtn.disabled = true;
     startBtn.disabled = false;
-    connectBtn.disabled = false;
 
     if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
@@ -428,6 +463,26 @@ async function createAnswer(offer, broadcasterId) {
 
 function requestConnectAsViewer() {
     send({ type: "request_offer", viewerId: userId });
+}
+
+// DROPDOWN FUNCTIONALITY
+function toggleBroadcasterList() {
+    const box = document.getElementById("broadcasterList");
+    box.style.display = box.style.display === "none" ? "block" : "none";
+}
+
+function updateBroadcasterList() {
+    const box = document.getElementById("broadcasterList");
+    box.innerHTML = "<h4>Available Broadcasters:</h4>";
+
+    if (broadcasters.length === 0) {
+        box.innerHTML += "<p>No broadcasters online.</p>";
+        return;
+    }
+
+    broadcasters.forEach(b => {
+        box.innerHTML += `<p>• ${b.name}</p>`;
+    });
 }
 
 // INIT
