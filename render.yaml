@@ -19,7 +19,7 @@ services:
     buildCommand: npm install
     
     # Command to start the application (references the main script)
-    startCommand: node server.js
+    startCommand: npm start
     
     # The environment uses port 80 for public traffic, which Render maps to 
     # the internal port used by 'server.js' (process.env.PORT).
