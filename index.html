@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Live Stream Client</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+        }
+        .video-feed {
+            width: 100%;
+            height: 100%;
+            background-color: #1f2937;
+            border-radius: 0.75rem;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+        #remoteVideo {
+            transform: scaleX(1);
+        }
+    </style>
+</head>
+
+<body class="p-4 sm:p-8">
+    <div class="max-w-4xl mx-auto">
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">Full Stack Live Stream</h1>
+            <p id="userIdDisplay" class="text-sm text-gray-500">Your ID: Connecting...</p>
+            <p id="broadcasterStatus" class="mt-1 font-medium text-blue-600">Status: Waiting for Broadcaster.</p>
+            <p class="text-xs mt-2 text-red-500">Note: P2P simulated connections.</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+
+            <!-- LOCAL STREAM -->
+            <div class="bg-white p-4 rounded-xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-3 text-gray-700">Your Camera</h2>
+                <div class="video-container shadow-xl">
+                    <video id="localVideo" class="video-feed" autoplay playsinline muted></video>
+                </div>
+
+                <div class="flex space-x-2 mt-4">
+                    <button id="startStreamBtn" onclick="startLocalStream(true)" class="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg shadow-md">
+                        <span id="startText">Start Broadcast</span>
+                    </button>
+
+                    <button id="stopStreamBtn" onclick="stopLocalStream()" class="flex-1 px-4 py-2 bg-red-500 text-white rounded-lg shadow-md" disabled>
+                        Stop Broadcast
+                    </button>
+                </div>
+
+                <div class="mt-3 flex justify-between items-center">
+                    <label class="inline-flex items-center">
+                        <input type="checkbox" id="frontCameraToggle" checked>
+                        <span class="ml-2 text-gray-700 text-sm">Use Front Camera</span>
+                    </label>
+
+                    <button id="connectBtn" onclick="requestConnectAsViewer()" class="px-3 py-1 bg-blue-500 text-white rounded-lg shadow-md" disabled>
+                        Connect as Viewer
+                    </button>
+                </div>
+            </div>
+
+            <!-- REMOTE STREAM -->
+            <div class="bg-white p-4 rounded-xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-3 text-gray-700">Remote Broadcast Feed</h2>
+                <div class="video-container shadow-xl">
+                    <video id="remoteVideo" class="video-feed" autoplay playsinline></video>
+                    <p id="remoteStatus" class="absolute inset-0 flex items-center justify-center text-white text-lg font-bold bg-black bg-opacity-50 rounded-xl">
+                        Awaiting Stream...
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONSOLE -->
+        <div class="bg-white p-4 rounded-xl shadow-lg mt-6">
+            <h3 class="text-lg font-semibold mb-2">System Console</h3>
+            <div id="statusConsole" class="bg-gray-100 p-3 rounded-lg text-sm h-32 overflow-y-scroll"></div>
+        </div>
+    </div>
+
+<script>
+// =========================================================
+// FIXED VERSION
+// =========================================================
+
+// WebSocket URL FIXED
+const WS_URL =
+    (window.location.protocol === "https:" ? "wss://" : "ws://") +
+    window.location.host;
+
+let ws = null;
+let pc = null;
+let localStream = null;
+let userId = null;
+let activeBroadcasterId = null;
+let isBroadcasting = false;
+
+const localVideo = document.getElementById("localVideo");
+const remoteVideo = document.getElementById("remoteVideo");
+const remoteStatus = document.getElementById("remoteStatus");
+const consoleEl = document.getElementById("statusConsole");
+const startBtn = document.getElementById("startStreamBtn");
+const stopBtn = document.getElementById("stopStreamBtn");
+const connectBtn = document.getElementById("connectBtn");
+const cameraToggle = document.getElementById("frontCameraToggle");
+const userIdDisplay = document.getElementById("userIdDisplay");
+const broadcasterStatus = document.getElementById("broadcasterStatus");
+
+const PEER_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+function log(msg) {
+    const p = document.createElement("p");
+    p.textContent = msg;
+    consoleEl.appendChild(p);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+
+function connectSignalingServer() {
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => log("Connected to signaling server.");
+    ws.onmessage = handleSignalMessage;
+    ws.onclose = () => {
+        log("Disconnected. Reconnecting...");
+        setTimeout(connectSignalingServer, 2000);
+    };
+}
+
+function send(msg) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+function handleSignalMessage(event) {
+    const data = JSON.parse(event.data);
+
+    if (data.type === "id") {
+        userId = data.id;
+        userIdDisplay.textContent = "Your ID: " + userId;
+        return;
+    }
+
+    if (data.type === "broadcaster_started") {
+        activeBroadcasterId = data.broadcasterId;
+        broadcasterStatus.textContent = "Broadcaster online: " + activeBroadcasterId;
+        connectBtn.disabled = false;
+        return;
+    }
+
+    if (data.type === "broadcaster_ended") {
+        activeBroadcasterId = null;
+        broadcasterStatus.textContent = "No active broadcaster.";
+        connectBtn.disabled = true;
+        return;
+    }
+
+    // Offer → viewer gets from broadcaster
+    if (data.type === "offer") {
+        startLocalStream(false).then(() => createAnswer(data.sdp, data.senderId));
+    }
+
+    // Answer → broadcaster gets from viewer
+    if (data.type === "answer") {
+        pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    }
+
+    // ICE
+    if (data.type === "candidate") {
+        pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+    }
+}
+
+async function startLocalStream(isBroadcaster = false) {
+    const constraints = {
+        video: { facingMode: cameraToggle.checked ? "user" : "environment" },
+        audio: true,
+    };
+
+    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    localVideo.srcObject = localStream;
+
+    isBroadcasting = isBroadcaster;
+
+    if (isBroadcaster) {
+        send({ type: "start_broadcast" });
+        broadcasterStatus.textContent = "YOU ARE BROADCASTING";
+    }
+
+    initPeerConnection();
+}
+
+function stopLocalStream() {
+    if (localStream) localStream.getTracks().forEach((t) => t.stop());
+    localStream = null;
+
+    if (isBroadcasting) send({ type: "stop_broadcast" });
+
+    stopPeerConnection();
+}
+
+function initPeerConnection() {
+    pc = new RTCPeerConnection(PEER_CONFIG);
+
+    if (localStream) {
+        localStream.getTracks().forEach((track) =>
+            pc.addTrack(track, localStream)
+        );
+    }
+
+    pc.ontrack = (e) => {
+        remoteVideo.srcObject = e.streams[0];
+        remoteStatus.textContent = "";
+    };
+
+    pc.onicecandidate = (e) => {
+        if (e.candidate) {
+            send({
+                type: "candidate",
+                candidate: e.candidate,
+                targetId: isBroadcasting ? pc.viewerId : activeBroadcasterId,
+            });
+        }
+    };
+}
+
+function stopPeerConnection() {
+    if (pc) pc.close();
+    pc = null;
+}
+
+// Broadcaster → makes offer for viewer
+async function createOffer(targetViewerId) {
+    pc.viewerId = targetViewerId;
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    send({
+        type: "offer",
+        sdp: offer,
+        targetId: targetViewerId,
+    });
+}
+
+// Viewer → answers offer
+async function createAnswer(offer, broadcasterId) {
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    send({
+        type: "answer",
+        sdp: answer,
+        targetId: broadcasterId,
+    });
+}
+
+// Viewer requests connection
+function requestConnectAsViewer() {
+    send({ type: "request_offer", targetId: activeBroadcasterId });
+}
+
+// Init
+connectSignalingServer();
+
+</script>
+</body>
+</html>
