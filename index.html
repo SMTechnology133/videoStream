@@ -171,6 +171,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 <footer style="font-size:10px;">&copy; 2025 Copyright SM Technology Live Streaming</footer>
 
 <script>
+/* ============================
+   Client-side signaling & UI
+   ============================ */
+
 const WS_URL = (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host;
 let ws = null;
 let pc = null;
@@ -181,6 +185,7 @@ let profilePic = null;
 let activeBroadcasterId = null;
 let activeBroadcasterName = null;
 let isBroadcasting = false;
+let queuedProfileSend = false; // if profile saved before ws open
 
 const localVideo = document.getElementById("localVideo");
 const localPlaceholder = document.getElementById("localPlaceholder");
@@ -208,8 +213,9 @@ function log(msg) {
     consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
-// ---------------- LOGIN & PROFILE ----------------
+/* ---------------- LOGIN & PROFILE ---------------- */
 window.onload = () => {
+    // load saved profile (if any)
     const savedName = localStorage.getItem("username");
     const savedPic = localStorage.getItem("profilePic");
 
@@ -218,15 +224,19 @@ window.onload = () => {
         profilePic = savedPic;
         document.getElementById("loginScreen").style.display = "none";
 
+        // show placeholder instead of camera until user starts broadcast
         localVideo.style.display = "none";
         localPlaceholder.src = profilePic;
         localPlaceholder.style.display = "block";
 
-        sendProfileToServer();
         changeProfileBtn.style.display = "inline-block";
+
+        // If WS not connected yet, mark to send when ready
+        queuedProfileSend = true;
     }
 };
 
+/* preview profile image */
 document.getElementById("profilePicInput").addEventListener("change", function() {
     const file = this.files[0];
     if (!file) return;
@@ -238,12 +248,13 @@ document.getElementById("profilePicInput").addEventListener("change", function()
     reader.readAsDataURL(file);
 });
 
+/* save profile */
 document.getElementById("saveProfileBtn").addEventListener("click", () => {
     const nameInput = document.getElementById("usernameInput").value.trim();
     const picSrc = document.getElementById("previewPic").src;
 
     if (!nameInput) { alert("Enter your name"); return; }
-    if (!picSrc) { alert("Upload a picture"); return; }
+    if (!picSrc || picSrc === "") { alert("Upload a picture"); return; }
 
     username = nameInput;
     profilePic = picSrc;
@@ -252,16 +263,20 @@ document.getElementById("saveProfileBtn").addEventListener("click", () => {
     localStorage.setItem("profilePic", profilePic);
 
     document.getElementById("loginScreen").style.display = "none";
-
     localVideo.style.display = "none";
     localPlaceholder.src = profilePic;
     localPlaceholder.style.display = "block";
-
-    sendProfileToServer();
     changeProfileBtn.style.display = "inline-block";
+
+    // if ws open, send immediately, otherwise queue to send on open
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        sendProfileToServer();
+    } else {
+        queuedProfileSend = true;
+    }
 });
 
-// Change Profile / Logout button
+/* Change Profile / Logout button */
 changeProfileBtn.addEventListener("click", () => {
     stopLocalStream();
     localStorage.removeItem("username");
@@ -277,56 +292,74 @@ changeProfileBtn.addEventListener("click", () => {
     changeProfileBtn.style.display = "none";
 
     if (ws && ws.readyState === WebSocket.OPEN) {
+        // notify server (compatible with either "logout" or "set_name" = empty)
         ws.send(JSON.stringify({ type: "logout" }));
+        ws.send(JSON.stringify({ type: "set_name", name: null }));
+        ws.send(JSON.stringify({ type: "setProfile", username: null }));
     }
 });
 
 function sendProfileToServer() {
+    if (!username) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "setProfile", username, profilePic }));
+        // send both forms to support either server variant
+        ws.send(JSON.stringify({ type: "set_name", name: username }));
+        ws.send(JSON.stringify({ type: "setProfile", username: username, profilePic: profilePic }));
+        queuedProfileSend = false;
+
+        // update ID display to show name (if we already have userId, show both)
+        userIdDisplay.textContent = "Logged in as: " + username + (userId ? " ("+userId+")" : "");
+        log("Profile sent to server: " + username);
+    } else {
+        queuedProfileSend = true;
     }
 }
 
-// ---------------- BROADCASTER DROPDOWN ----------------
+/* ---------------- BROADCASTER DROPDOWN ---------------- */
 function toggleBroadcasterList() {
     broadcasterDropdownVisible = !broadcasterDropdownVisible;
     broadcasterListEl.style.display = broadcasterDropdownVisible ? "block" : "none";
 }
 
-// Update broadcaster list with profile pictures and clickable selection
 function updateBroadcasterDropdown(list) {
+    // list may be full message object if server sent entire payload; normalize
+    const items = Array.isArray(list) ? list : (list && list.list) ? list.list : [];
     broadcasterListEl.innerHTML = "<h4>Available Broadcasters:</h4>";
-    if (!list || list.length === 0) {
+    if (!items || items.length === 0) {
         broadcasterListEl.innerHTML += "<p>No broadcasters online.</p>";
         return;
     }
 
-    list.forEach(b => {
+    items.forEach(b => {
         const entry = document.createElement("div");
         entry.style.cursor = "pointer";
         entry.style.display = "flex";
         entry.style.alignItems = "center";
         entry.style.gap = "8px";
-        entry.style.marginBottom = "4px";
+        entry.style.marginBottom = "6px";
+        entry.style.padding = "6px";
+        entry.style.borderRadius = "6px";
 
         const img = document.createElement("img");
-        img.src = b.pic || "";
-        img.alt = b.name;
-        img.style.width = "30px";
-        img.style.height = "30px";
+        img.src = b.profilePic || b.pic || b.picUrl || "";
+        img.alt = b.name || "Anon";
+        img.style.width = "36px";
+        img.style.height = "36px";
         img.style.borderRadius = "50%";
+        img.style.objectFit = "cover";
+        img.style.border = "1px solid #ddd";
 
         const nameSpan = document.createElement("span");
-        nameSpan.textContent = b.name;
+        nameSpan.textContent = b.name || b.username || ("User " + (b.id ? b.id.slice(0,6) : ""));
 
         entry.appendChild(img);
         entry.appendChild(nameSpan);
 
         entry.addEventListener("click", () => {
             activeBroadcasterId = b.id;
-            activeBroadcasterName = b.name;
+            activeBroadcasterName = b.name || b.username;
             connectBtn.disabled = false;
-            broadcasterStatus.textContent = "Selected Broadcaster: " + b.name;
+            broadcasterStatus.textContent = "Selected Broadcaster: " + (activeBroadcasterName || activeBroadcasterId);
             broadcasterListEl.style.display = "none";
             broadcasterDropdownVisible = false;
         });
@@ -335,51 +368,110 @@ function updateBroadcasterDropdown(list) {
     });
 }
 
-// ---------------- WEBSOCKET ----------------
+/* ---------------- WEBSOCKET ---------------- */
 function connectSignalingServer() {
     ws = new WebSocket(WS_URL);
+
     ws.onopen = () => {
         log("Connected to server");
-        sendProfileToServer();
+        // If we had a profile waiting to send, do it now
+        if (queuedProfileSend) sendProfileToServer();
     };
 
     ws.onmessage = (msg) => {
-        const data = JSON.parse(msg.data);
+        let data;
+        try { data = JSON.parse(msg.data); } catch (e) { return; }
 
-        switch (data.type) {
-            case "broadcaster_list":
-                updateBroadcasterDropdown(data);
-                break;
-            case "broadcaster_started":
-                broadcasterStatus.textContent = "Broadcaster Online: " + data.broadcasterName;
-                updateBroadcasterDropdown(data.list || []);
-                connectBtn.disabled = false;
-                break;
-            case "broadcaster_ended":
-                broadcasterStatus.textContent = "No active broadcaster.";
-                connectBtn.disabled = true;
-                remoteVideo.srcObject = null;
-                remoteStatus.textContent = "Awaiting Stream...";
-                updateBroadcasterDropdown(data.list || []);
-                break;
-
-            case "offer":
-                startLocalStream(false).then(() => createAnswer(data.sdp, data.from));
-                break;
-            case "answer":
-                pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-                break;
-            case "candidate":
-                if (pc) pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-                break;
+        // server assigned id
+        if (data.type === "id") {
+            userId = data.id;
+            // show chosen username if available, otherwise show id
+            userIdDisplay.textContent = username ? ("Logged in as: " + username + " ("+userId+")") : ("Your ID: " + userId);
+            return;
         }
+
+        if (data.type === "broadcaster_list") {
+            // server might send { type:'broadcaster_list', list: [...] }
+            updateBroadcasterDropdown(data.list || data);
+            return;
+        }
+
+        if (data.type === "broadcaster_started") {
+            // server may send broadcasterName and optionally list
+            activeBroadcasterId = data.broadcasterId;
+            activeBroadcasterName = data.broadcasterName || data.name || null;
+
+            broadcasterStatus.textContent = "Broadcaster Online: " + (activeBroadcasterName || activeBroadcasterId);
+            // update list if server provided it
+            if (data.list) updateBroadcasterDropdown(data.list);
+            connectBtn.disabled = false;
+            return;
+        }
+
+        if (data.type === "broadcaster_ended") {
+            activeBroadcasterId = null;
+            activeBroadcasterName = null;
+            broadcasterStatus.textContent = "No active broadcaster.";
+            connectBtn.disabled = true;
+            remoteVideo.srcObject = null;
+            remoteStatus.textContent = "Awaiting Stream...";
+            if (data.list) updateBroadcasterDropdown(data.list);
+            return;
+        }
+
+        // A broadcaster received a viewer request (server forwards viewer's request to broadcaster)
+        if (data.type === "request_offer") {
+            // if I am the broadcaster, create offer to the viewer
+            if (isBroadcasting && data.viewerId) {
+                // ensure peer connection exists
+                if (!pc) initPeerConnection();
+                createOffer(data.viewerId);
+            }
+            return;
+        }
+
+        // Offer sent from broadcaster to viewer
+        if (data.type === "offer") {
+            // viewer receives offer (server should include senderId/to/from semantics)
+            const from = data.senderId || data.from || data.broadcasterId;
+            startLocalStream(false).then(() => createAnswer(data.sdp, from));
+            return;
+        }
+
+        // Answer from viewer to broadcaster
+        if (data.type === "answer") {
+            if (pc) pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            return;
+        }
+
+        // ICE candidate
+        if (data.type === "candidate") {
+            if (pc) pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => console.warn(e));
+            return;
+        }
+
+        // legacy support: server might send full list object as message for update
+        if (Array.isArray(data)) {
+            updateBroadcasterDropdown(data);
+            return;
+        }
+
+        // debug
+        log("Unknown message: " + JSON.stringify(data));
     };
 
-    ws.onclose = () => setTimeout(connectSignalingServer, 1500);
+    ws.onclose = () => {
+        log("Disconnected from signaling server - retrying...");
+        setTimeout(connectSignalingServer, 1500);
+    };
+
+    ws.onerror = (e) => {
+        console.warn("WebSocket error", e);
+    };
 }
 connectSignalingServer();
 
-// ---------------- WEBRTC LOGIC ----------------
+/* ---------------- WEBRTC LOGIC ---------------- */
 async function startLocalStream(isBroadcaster = false) {
     startBtn.disabled = true;
     stopBtn.disabled = false;
@@ -400,7 +492,11 @@ async function startLocalStream(isBroadcaster = false) {
 
     isBroadcasting = isBroadcaster;
     if (isBroadcasting) {
-        ws.send(JSON.stringify({ type: "start_broadcast", name: username }));
+        // send both name-only and profile variant for server compatibility
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "start_broadcast", name: username || null }));
+            ws.send(JSON.stringify({ type: "start_broadcast_profile", broadcasterId: userId, name: username || null, profilePic: profilePic || null }));
+        }
         broadcasterStatus.textContent = "YOU ARE BROADCASTING";
     }
 
@@ -414,7 +510,9 @@ function stopLocalStream() {
     if (localStream) localStream.getTracks().forEach(t => t.stop());
     localStream = null;
 
-    if (isBroadcasting) ws.send(JSON.stringify({ type: "stop_broadcast" }));
+    if (isBroadcasting && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "stop_broadcast" }));
+    }
 
     stopPeerConnection();
 
@@ -433,30 +531,47 @@ function initPeerConnection() {
     if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
     pc.ontrack = (event) => { remoteVideo.srcObject = event.streams[0]; remoteStatus.textContent = ""; };
+
     pc.onicecandidate = (event) => {
-        if (event.candidate) ws.send(JSON.stringify({ type: "candidate", candidate: event.candidate, to: pc.targetId }));
+        if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "candidate", candidate: event.candidate, targetId: pc.targetId }));
+        }
     };
 }
 
 function stopPeerConnection() { if (pc) pc.close(); pc = null; }
 
 async function createOffer(viewerId) {
+    if (!pc) initPeerConnection();
     pc.targetId = viewerId;
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    ws.send(JSON.stringify({ type: "offer", sdp: offer, to: viewerId }));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "offer", sdp: offer, targetId: viewerId }));
+    }
 }
 
 async function createAnswer(offer, broadcasterId) {
+    if (!pc) initPeerConnection();
     pc.targetId = broadcasterId;
     await pc.setRemoteDescription(new RTCSessionDescription(offer));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    ws.send(JSON.stringify({ type: "answer", sdp: answer, to: broadcasterId }));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "answer", sdp: answer, targetId: broadcasterId }));
+    }
 }
 
 function requestConnectAsViewer() {
-    if (activeBroadcasterId) ws.send(JSON.stringify({ type: "request_offer", viewerId: userId, to: activeBroadcasterId }));
+    // attempt to use selected broadcaster, fallback to activeBroadcasterId
+    const targetId = activeBroadcasterId;
+    if (!targetId) return alert("No broadcaster selected. Use 'Show Broadcasters' and pick one.");
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "request_offer", viewerId: userId }));
+        log("Requested connection to broadcaster: " + targetId);
+    } else {
+        alert("Signaling connection not open.");
+    }
 }
 </script>
 </body>
