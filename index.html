@@ -35,10 +35,24 @@ h2 {
     color: orange;
     text-align: center;
 }
-.container { max-width: 1100px; margin: auto; }
-header { margin-bottom: 20px; }
-.grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+
+.container {
+	 max-width: 1100px;
+	  margin: auto;
+	   }
+	   
+header {
+	 margin-bottom: 20px;
+	  }
+	  
+.grid {
+	 display: grid;
+	  grid-template-columns: 1fr;
+	   gap: 20px;
+	    }
+	    
 @media (min-width: 768px) { .grid { grid-template-columns: 1fr 1fr; } }
+
 .card {
     background: linear-gradient(to right, maroon, teal);
     padding: 2px;
@@ -48,17 +62,79 @@ header { margin-bottom: 20px; }
     text-align: left;
     border:1px solid orange;
 }
-.video-container { position: relative; width: 100%; aspect-ratio: 16 / 9; }
-.video-feed { width: 100%; height: 100%; background-color: #1f2937; border-radius: 10px; object-fit: cover; transform: scaleX(-1); }
-#remoteVideo { transform: scaleX(1); }
-button { padding: 10px 15px; border-radius: 8px; border: none; cursor: pointer; color: white; font-weight: bold; }
-.btn-green { background: teal; color: orange; }
-.btn-red { background: maroon; color: orange; }
-.btn-blue { background: orange; color: gray; }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-.flex-row { display: flex; gap: 10px; margin-top: 15px; }
-.flex-between { display: flex; justify-content: space-between; align-items: center; }
-#remoteStatus { position: absolute; inset: 0; background: rgba(0,0,0,0.5); border-radius: 10px; color: white; font-size: 18px; display: flex; align-items: center; justify-content: center; }
+
+.video-container {
+	 position: relative;
+	  width: 100%;
+	   aspect-ratio: 16 / 9;
+	    }
+	    
+.video-feed {
+	 width: 100%;
+	  height: 100%;
+	   background-color: #1f2937;
+	    border-radius: 10px;
+	     object-fit: cover;
+	      transform: scaleX(-1);
+	       }
+	       
+#remoteVideo {
+	 transform: scaleX(1);
+	  }
+	  
+button {
+	 padding: 10px 15px;
+	  border-radius: 8px;
+	   border: none;
+	    cursor: pointer;
+	     color: white;
+	      font-weight: bold;
+	       }
+	       
+.btn-green {
+	 background: teal;
+	  color: orange;
+	   }
+	   
+.btn-red {
+	 background: maroon;
+	  color: orange;
+	   }
+	   
+.btn-blue {
+	 background: orange;
+	  color: gray;
+	   }
+	   
+button:disabled {
+	 opacity: 0.5;
+	  cursor: not-allowed;
+	   }
+	   
+.flex-row {
+	 display: flex;
+	  gap: 10px;
+	   margin-top: 15px;
+	    }
+	    
+.flex-between {
+	 display: flex;
+	  justify-content: space-between;
+	   align-items: center;
+	    }
+	    
+#remoteStatus {
+	 position: absolute;
+	  inset: 0;
+	   background: rgba(0,0,0,0.5);
+	    border-radius: 10px;
+	     color: white;
+	      font-size: 18px;
+	       display: flex;
+	        align-items: center;
+	         justify-content: center;
+	          }
+	          
 #statusConsole {
     background: #f3f4f6;
     padding: 12px;
@@ -69,11 +145,52 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     border: 1px solid orange;
     color: teal;
 }
-.login-screen input[type="text"] { width: 90%; padding: 6px; margin-top: 6px; border-radius: 6px; border:1px solid orange; }
-.login-screen input[type="file"] { margin-top:6px; }
-.previewPic { width:60px; height:60px; border-radius:50%; display:none; margin-top:6px; border:1px solid orange; }
-#broadcasterList img { width:30px;height:30px;border-radius:50%;vertical-align:middle;margin-right:5px; }
-#localPlaceholder { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; border-radius:10px; display:none; }
+
+.login-screen input[type="text"] {
+	 width: 90%;
+	  padding: 6px;
+	   margin-top: 6px;
+	    border-radius: 6px;
+	     border:1px solid gray;
+	     background:orange;
+	     color:orange;
+	      }
+	      
+.login-screen input[type="file"] {
+	 margin-top:6px;
+	 border:1px solid gray;
+	 border-radius: 6px;
+	 background:orange;
+	 color:gray;
+	 padding: 4px;
+	  }
+	  
+.previewPic {
+	 width:60px;
+	  height:60px;
+	   border-radius:50%;
+	    display:none;
+	     margin-top:6px;
+	      border:1px solid orange;
+	       }
+	       
+#broadcasterList img {
+	 width:30px;
+	 height:30px;
+	 border-radius:50%;
+	 vertical-align:middle;
+	 margin-right:5px;
+	  }
+	  
+	  
+#localPlaceholder {
+	 position:absolute;
+	  inset:0; width:100%;
+	   height:100%;
+	    object-fit:cover;
+	     border-radius:10px;
+	      display:none;
+	       }
 
 /* small grid styling for the broadcaster tiles (minimal, won't conflict) */
 .broadcaster-tile {
@@ -87,16 +204,33 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     transition: background 0.12s, border 0.12s;
     border:1px solid rgba(0,0,0,0.04);
 }
-.broadcaster-tile:hover { background: rgba(0,0,0,0.04); }
-.broadcaster-avatar { width:48px; height:48px; border-radius:50%; object-fit:cover; border:1px solid #ddd; }
-.broadcaster-name { font-weight:600; color:#111; }
+
+.broadcaster-tile:hover {
+	 background: rgba(0,0,0,0.04);
+	  }
+	  
+.broadcaster-avatar {
+	 width:48px;
+	  height:48px;
+	   border-radius:50%;
+	    object-fit:cover;
+	     border:1px solid #ddd;
+	      }
+	      
+.broadcaster-name {
+	 font-weight:600;
+	  color:#111;
+	   }
 
 /* NEW: highlight for joined/selected tile */
 .broadcaster-tile.joined {
     background: rgba(34,197,94,0.12); /* light green */
     border: 1px solid rgba(34,197,94,0.28);
 }
-.broadcaster-tile .join-btn { margin-left:auto; }
+
+.broadcaster-tile .join-btn {
+	 margin-left:auto;
+	  }
 
 .user-header {
     display:flex;
@@ -112,7 +246,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     object-fit:cover;
     border: 1px solid orange;
 }
-.user-name { font-weight:700; color: white; font-size:16px; }
+.user-name {
+	 font-weight:700;
+	  color: white;
+	   font-size:16px;
+	    }
+	    
+	    label{
+	    	text-decoration: underline;
+	    }
 </style>
 </head>
 
@@ -120,7 +262,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 <div class="container">
 
 <header>
-<h1>Full Stack Live Stream</h1>
+<h1>Africa Online Live Streaming</h1>
 
 <div id="loginScreen" class="login-screen">
     <h2>Welcome</h2>
@@ -133,7 +275,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
     <img id="previewPic" class="previewPic"><br><br>
 
-    <button id="saveProfileBtn">Save & Continue</button>
+    <button style="border:1px solid orange; background:maroon; color:orange;" id="saveProfileBtn">Save & Continue</button>
 </div>
 
 <!-- NEW: user header shows avatar + name only (no UUID) -->
@@ -164,9 +306,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
         </div>
 
         <div class="flex-between" style="margin-top:15px;">
-            <label>
+            <label style="text-decoration: none;">
                 <input type="checkbox" id="frontCameraToggle" checked>
-                <span style="margin-left:5px;">Use Front Camera</span>
+                <span style="margin-left:5px; color: teal;">Use Front Camera</span>
             </label>
 
             <button id="connectBtn" onclick="requestConnectAsViewer()" class="btn-blue" disabled>
@@ -190,8 +332,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 </div><br>
 
-<button onclick="toggleBroadcasterList()">Show Broadcasters ▼</button>
-<div id="broadcasterList" style="display:none; background:white; color:black; padding:10px; margin:10px; border-radius:6px; border:1px solid orange;">
+<button style="border:1px solid orange; background:maroon; color:orange;" onclick="toggleBroadcasterList()">Show Broadcasters ▼</button>
+<div id="broadcasterList" style="display:none; background:gray; color:black; padding:10px; margin:10px; border-radius:6px; border:1px solid orange;">
     Loading…
 </div>
 
