@@ -6,6 +6,7 @@
 <title>WebRTC Live Stream Client</title>
 
 <style>
+/* ... (your existing CSS unchanged) ... */
 body {
     font-family: georgia;
     background: linear-gradient(to right, teal, maroon);
@@ -16,7 +17,7 @@ body {
     text-align: center;
     padding: 2px;
 }
-
+/* rest of your CSS remains the same */
 footer, h1 {
     border: 1px solid orange;
     border-radius: 4px;
@@ -25,7 +26,7 @@ footer, h1 {
     padding: 10px;
     color: orange;
 }
-
+/* keep all your existing styles unchanged */
 h2 {
     border: 1px solid orange;
     border-radius: 6px;
@@ -36,12 +37,10 @@ h2 {
     color: orange;
     text-align: center;
 }
-
 .container { max-width: 1100px; margin: auto; }
 header { margin-bottom: 20px; }
 .grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
 @media (min-width: 768px) { .grid { grid-template-columns: 1fr 1fr; } }
-
 .card {
     background: linear-gradient(to right, maroon, teal);
     padding: 2px;
@@ -51,22 +50,17 @@ header { margin-bottom: 20px; }
     text-align: left;
     border:1px solid orange;
 }
-
 .video-container { position: relative; width: 100%; aspect-ratio: 16 / 9; }
 .video-feed { width: 100%; height: 100%; background-color: #1f2937; border-radius: 10px; object-fit: cover; transform: scaleX(-1); }
 #remoteVideo { transform: scaleX(1); }
-
 button { padding: 10px 15px; border-radius: 8px; border: none; cursor: pointer; color: white; font-weight: bold; }
 .btn-green { background: teal; color: orange; }
 .btn-red { background: maroon; color: orange; }
 .btn-blue { background: orange; color: gray; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
-
 .flex-row { display: flex; gap: 10px; margin-top: 15px; }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
-
 #remoteStatus { position: absolute; inset: 0; background: rgba(0,0,0,0.5); border-radius: 10px; color: white; font-size: 18px; display: flex; align-items: center; justify-content: center; }
-
 #statusConsole {
     background: #f3f4f6;
     padding: 12px;
@@ -77,14 +71,26 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     border: 1px solid orange;
     color: teal;
 }
-
 .login-screen input[type="text"] { width: 90%; padding: 6px; margin-top: 6px; border-radius: 6px; border:1px solid orange; }
 .login-screen input[type="file"] { margin-top:6px; }
-.previewPic { width:60px;height:60px;border-radius:50%;display:none;margin-top:6px; }
-
+.previewPic { width:60px; height:60px; border-radius:50%; display:none; margin-top:6px; border:1px solid orange; }
 #broadcasterList img { width:30px;height:30px;border-radius:50%;vertical-align:middle;margin-right:5px; }
-
 #localPlaceholder { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; border-radius:10px; display:none; }
+
+/* small grid styling for the broadcaster tiles (minimal, won't conflict) */
+.broadcaster-tile {
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:8px;
+    border-radius:8px;
+    margin-bottom:8px;
+    cursor:pointer;
+    transition: background 0.12s;
+}
+.broadcaster-tile:hover { background: rgba(0,0,0,0.06); }
+.broadcaster-avatar { width:48px; height:48px; border-radius:50%; object-fit:cover; border:1px solid #ddd; }
+.broadcaster-name { font-weight:600; color:#111; }
 </style>
 </head>
 
@@ -108,7 +114,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     <button id="saveProfileBtn">Save & Continue</button>
 </div>
 
-<p id="userIdDisplay" style="color:white;">Your ID: Connecting...</p>
+<p id="userIdDisplay" style="color:white;">Your: Connecting...</p>
 <p id="broadcasterStatus" style="color:yellow;">Status: Waiting for Broadcaster.</p>
 <p style="font-size:12px; margin-top:5px; color:lightcoral;">Note: P2P simulated connections.</p>
 </header>
@@ -173,14 +179,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 <script>
 /* ============================
    Client-side signaling & UI
+   (updated: show names only, clickable broadcaster tiles)
    ============================ */
 
 const WS_URL = (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host;
 let ws = null;
 let pc = null;
 let localStream = null;
-let userId = null;
-let username = null;
+let userId = null;        // internal id (not shown)
+let username = null;      // shown in UI
 let profilePic = null;
 let activeBroadcasterId = null;
 let activeBroadcasterName = null;
@@ -215,7 +222,6 @@ function log(msg) {
 
 /* ---------------- LOGIN & PROFILE ---------------- */
 window.onload = () => {
-    // load saved profile (if any)
     const savedName = localStorage.getItem("username");
     const savedPic = localStorage.getItem("profilePic");
 
@@ -224,19 +230,15 @@ window.onload = () => {
         profilePic = savedPic;
         document.getElementById("loginScreen").style.display = "none";
 
-        // show placeholder instead of camera until user starts broadcast
         localVideo.style.display = "none";
         localPlaceholder.src = profilePic;
         localPlaceholder.style.display = "block";
 
         changeProfileBtn.style.display = "inline-block";
-
-        // If WS not connected yet, mark to send when ready
         queuedProfileSend = true;
     }
 };
 
-/* preview profile image */
 document.getElementById("profilePicInput").addEventListener("change", function() {
     const file = this.files[0];
     if (!file) return;
@@ -248,7 +250,6 @@ document.getElementById("profilePicInput").addEventListener("change", function()
     reader.readAsDataURL(file);
 });
 
-/* save profile */
 document.getElementById("saveProfileBtn").addEventListener("click", () => {
     const nameInput = document.getElementById("usernameInput").value.trim();
     const picSrc = document.getElementById("previewPic").src;
@@ -268,7 +269,6 @@ document.getElementById("saveProfileBtn").addEventListener("click", () => {
     localPlaceholder.style.display = "block";
     changeProfileBtn.style.display = "inline-block";
 
-    // if ws open, send immediately, otherwise queue to send on open
     if (ws && ws.readyState === WebSocket.OPEN) {
         sendProfileToServer();
     } else {
@@ -276,7 +276,6 @@ document.getElementById("saveProfileBtn").addEventListener("click", () => {
     }
 });
 
-/* Change Profile / Logout button */
 changeProfileBtn.addEventListener("click", () => {
     stopLocalStream();
     localStorage.removeItem("username");
@@ -292,7 +291,6 @@ changeProfileBtn.addEventListener("click", () => {
     changeProfileBtn.style.display = "none";
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-        // notify server (compatible with either "logout" or "set_name" = empty)
         ws.send(JSON.stringify({ type: "logout" }));
         ws.send(JSON.stringify({ type: "set_name", name: null }));
         ws.send(JSON.stringify({ type: "setProfile", username: null }));
@@ -302,66 +300,79 @@ changeProfileBtn.addEventListener("click", () => {
 function sendProfileToServer() {
     if (!username) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
-        // send both forms to support either server variant
-        ws.send(JSON.stringify({ type: "set_name", name: username }));
         ws.send(JSON.stringify({ type: "setProfile", username: username, profilePic: profilePic }));
+        // also support older server handlers
+        ws.send(JSON.stringify({ type: "set_name", name: username }));
         queuedProfileSend = false;
 
-        // update ID display to show name (if we already have userId, show both)
-        userIdDisplay.textContent = "Logged in as: " + username + (userId ? " ("+userId+")" : "");
-        log("Profile sent to server: " + username);
+        // show username only in UI
+        userIdDisplay.textContent = username;
+        log("Profile sent: " + username);
     } else {
         queuedProfileSend = true;
     }
 }
 
-/* ---------------- BROADCASTER DROPDOWN ---------------- */
+/* ---------------- BROADCASTER DROPDOWN (grid) ---------------- */
 function toggleBroadcasterList() {
     broadcasterDropdownVisible = !broadcasterDropdownVisible;
     broadcasterListEl.style.display = broadcasterDropdownVisible ? "block" : "none";
 }
 
 function updateBroadcasterDropdown(list) {
-    // list may be full message object if server sent entire payload; normalize
+    // normalize
     const items = Array.isArray(list) ? list : (list && list.list) ? list.list : [];
     broadcasterListEl.innerHTML = "<h4>Available Broadcasters:</h4>";
     if (!items || items.length === 0) {
         broadcasterListEl.innerHTML += "<p>No broadcasters online.</p>";
+        connectBtn.disabled = true;
         return;
     }
 
+    connectBtn.disabled = true; // require selection
+
     items.forEach(b => {
         const entry = document.createElement("div");
-        entry.style.cursor = "pointer";
-        entry.style.display = "flex";
-        entry.style.alignItems = "center";
-        entry.style.gap = "8px";
-        entry.style.marginBottom = "6px";
-        entry.style.padding = "6px";
-        entry.style.borderRadius = "6px";
+        entry.className = "broadcaster-tile";
 
         const img = document.createElement("img");
-        img.src = b.profilePic || b.pic || b.picUrl || "";
+        img.className = "broadcaster-avatar";
+        img.src = b.profilePic || "";
         img.alt = b.name || "Anon";
-        img.style.width = "36px";
-        img.style.height = "36px";
-        img.style.borderRadius = "50%";
-        img.style.objectFit = "cover";
-        img.style.border = "1px solid #ddd";
 
-        const nameSpan = document.createElement("span");
-        nameSpan.textContent = b.name || b.username || ("User " + (b.id ? b.id.slice(0,6) : ""));
+        const nameDiv = document.createElement("div");
+        nameDiv.className = "broadcaster-name";
+        nameDiv.textContent = b.name || ("User");
+
+        const joinBtn = document.createElement("button");
+        joinBtn.className = "btn-blue";
+        joinBtn.textContent = "Join";
+        joinBtn.style.marginLeft = "auto";
+
+        // tile click selects broadcaster
+        function selectBroadcaster() {
+            activeBroadcasterId = b.id;
+            activeBroadcasterName = b.name || "Unknown";
+            connectBtn.disabled = false;
+            broadcasterStatus.textContent = "Selected Broadcaster: " + activeBroadcasterName;
+        }
 
         entry.appendChild(img);
-        entry.appendChild(nameSpan);
+        entry.appendChild(nameDiv);
+        entry.appendChild(joinBtn);
 
+        // clicking anywhere selects + triggers immediate join
         entry.addEventListener("click", () => {
-            activeBroadcasterId = b.id;
-            activeBroadcasterName = b.name || b.username;
-            connectBtn.disabled = false;
-            broadcasterStatus.textContent = "Selected Broadcaster: " + (activeBroadcasterName || activeBroadcasterId);
-            broadcasterListEl.style.display = "none";
-            broadcasterDropdownVisible = false;
+            selectBroadcaster();
+            // automatically request connect
+            requestConnectAsViewer();
+        });
+
+        // join button explicit action (also selects)
+        joinBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            selectBroadcaster();
+            requestConnectAsViewer();
         });
 
         broadcasterListEl.appendChild(entry);
@@ -374,7 +385,6 @@ function connectSignalingServer() {
 
     ws.onopen = () => {
         log("Connected to server");
-        // If we had a profile waiting to send, do it now
         if (queuedProfileSend) sendProfileToServer();
     };
 
@@ -382,29 +392,26 @@ function connectSignalingServer() {
         let data;
         try { data = JSON.parse(msg.data); } catch (e) { return; }
 
-        // server assigned id
+        // server assigned internal id (do not show cryptic id to user)
         if (data.type === "id") {
             userId = data.id;
-            // show chosen username if available, otherwise show id
-            userIdDisplay.textContent = username ? ("Logged in as: " + username + " ("+userId+")") : ("Your ID: " + userId);
+            // show username only if set
+            if (username) userIdDisplay.textContent = username;
+            else userIdDisplay.textContent = "You (not logged in)";
             return;
         }
 
         if (data.type === "broadcaster_list") {
-            // server might send { type:'broadcaster_list', list: [...] }
             updateBroadcasterDropdown(data.list || data);
             return;
         }
 
         if (data.type === "broadcaster_started") {
-            // server may send broadcasterName and optionally list
+            // update UI with name (no UUID shown)
             activeBroadcasterId = data.broadcasterId;
-            activeBroadcasterName = data.broadcasterName || data.name || null;
-
-            broadcasterStatus.textContent = "Broadcaster Online: " + (activeBroadcasterName || activeBroadcasterId);
-            // update list if server provided it
+            activeBroadcasterName = data.broadcasterName || data.name || "Broadcaster";
+            broadcasterStatus.textContent = "Broadcaster Online: " + activeBroadcasterName;
             if (data.list) updateBroadcasterDropdown(data.list);
-            connectBtn.disabled = false;
             return;
         }
 
@@ -412,51 +419,50 @@ function connectSignalingServer() {
             activeBroadcasterId = null;
             activeBroadcasterName = null;
             broadcasterStatus.textContent = "No active broadcaster.";
-            connectBtn.disabled = true;
             remoteVideo.srcObject = null;
             remoteStatus.textContent = "Awaiting Stream...";
             if (data.list) updateBroadcasterDropdown(data.list);
             return;
         }
 
-        // A broadcaster received a viewer request (server forwards viewer's request to broadcaster)
         if (data.type === "request_offer") {
-            // if I am the broadcaster, create offer to the viewer
+            // broadcaster receives this when a viewer wants to join
+            // includes viewerId and viewerName
             if (isBroadcasting && data.viewerId) {
-                // ensure peer connection exists
+                // ensure pc exists
                 if (!pc) initPeerConnection();
+                // create offer targeted to viewerId
                 createOffer(data.viewerId);
+                log("Creating offer for viewer: " + (data.viewerName || data.viewerId));
             }
             return;
         }
 
-        // Offer sent from broadcaster to viewer
         if (data.type === "offer") {
-            // viewer receives offer (server should include senderId/to/from semantics)
-            const from = data.senderId || data.from || data.broadcasterId;
-            startLocalStream(false).then(() => createAnswer(data.sdp, from));
+            // viewer receives offer from broadcaster
+            const fromId = data.senderId;
+            const fromName = data.senderName || "Broadcaster";
+            log("Received offer from: " + fromName);
+            startLocalStream(false).then(() => createAnswer(data.sdp, fromId));
             return;
         }
 
-        // Answer from viewer to broadcaster
         if (data.type === "answer") {
-            if (pc) pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            if (pc) {
+                pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                log("Answer received from: " + (data.senderName || data.senderId));
+            }
             return;
         }
 
-        // ICE candidate
         if (data.type === "candidate") {
-            if (pc) pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => console.warn(e));
+            if (pc) {
+                pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => console.warn(e));
+            }
             return;
         }
 
-        // legacy support: server might send full list object as message for update
-        if (Array.isArray(data)) {
-            updateBroadcasterDropdown(data);
-            return;
-        }
-
-        // debug
+        // unknown message
         log("Unknown message: " + JSON.stringify(data));
     };
 
@@ -492,10 +498,10 @@ async function startLocalStream(isBroadcaster = false) {
 
     isBroadcasting = isBroadcaster;
     if (isBroadcasting) {
-        // send both name-only and profile variant for server compatibility
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "start_broadcast", name: username || null }));
-            ws.send(JSON.stringify({ type: "start_broadcast_profile", broadcasterId: userId, name: username || null, profilePic: profilePic || null }));
+        } else {
+            log("Cannot start broadcast: signaling not open");
         }
         broadcasterStatus.textContent = "YOU ARE BROADCASTING";
     }
@@ -548,6 +554,7 @@ async function createOffer(viewerId) {
     await pc.setLocalDescription(offer);
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "offer", sdp: offer, targetId: viewerId }));
+        log("Offer sent to viewer");
     }
 }
 
@@ -559,16 +566,18 @@ async function createAnswer(offer, broadcasterId) {
     await pc.setLocalDescription(answer);
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "answer", sdp: answer, targetId: broadcasterId }));
+        log("Answer sent to broadcaster");
     }
 }
 
 function requestConnectAsViewer() {
-    // attempt to use selected broadcaster, fallback to activeBroadcasterId
+    // require a selected broadcaster tile (activeBroadcasterId)
     const targetId = activeBroadcasterId;
+    const targetName = activeBroadcasterName || "Selected Broadcaster";
     if (!targetId) return alert("No broadcaster selected. Use 'Show Broadcasters' and pick one.");
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "request_offer", viewerId: userId }));
-        log("Requested connection to broadcaster: " + targetId);
+        ws.send(JSON.stringify({ type: "request_offer", targetId, viewerId: userId }));
+        log("Requested connection to broadcaster: " + targetName);
     } else {
         alert("Signaling connection not open.");
     }
