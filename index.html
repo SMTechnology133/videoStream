@@ -233,8 +233,6 @@
 // =========================================================
 // FIXED VERSION
 // =========================================================
-
-// WebSocket URL FIXED
 const WS_URL =
     (window.location.protocol === "https:" ? "wss://" : "ws://") +
     window.location.host;
@@ -243,6 +241,7 @@ let ws = null;
 let pc = null;
 let localStream = null;
 let userId = null;
+let username = null;
 let activeBroadcasterId = null;
 let isBroadcasting = false;
 
@@ -250,12 +249,14 @@ const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 const remoteStatus = document.getElementById("remoteStatus");
 const consoleEl = document.getElementById("statusConsole");
+
 const startBtn = document.getElementById("startStreamBtn");
 const stopBtn = document.getElementById("stopStreamBtn");
 const connectBtn = document.getElementById("connectBtn");
-const cameraToggle = document.getElementById("frontCameraToggle");
 const userIdDisplay = document.getElementById("userIdDisplay");
 const broadcasterStatus = document.getElementById("broadcasterStatus");
+
+const cameraToggle = document.getElementById("frontCameraToggle");
 
 const PEER_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
@@ -286,13 +287,13 @@ function handleSignalMessage(event) {
 
     if (data.type === "id") {
         userId = data.id;
-        userIdDisplay.textContent = "Your ID: " + userId;
+        userIdDisplay.textContent = "Your ID: " + username;
         return;
     }
 
     if (data.type === "broadcaster_started") {
         activeBroadcasterId = data.broadcasterId;
-        broadcasterStatus.textContent = "Broadcaster online: " + activeBroadcasterId;
+        broadcasterStatus.textContent = "Broadcaster online: " + data.broadcasterId;
         connectBtn.disabled = false;
         return;
     }
@@ -301,26 +302,37 @@ function handleSignalMessage(event) {
         activeBroadcasterId = null;
         broadcasterStatus.textContent = "No active broadcaster.";
         connectBtn.disabled = true;
+        remoteVideo.srcObject = null;
+        remoteStatus.textContent = "Awaiting Stream...";
         return;
     }
 
-    // Offer → viewer gets from broadcaster
+    if (data.type === "request_offer") {
+        if (isBroadcasting) {
+            createOffer(data.viewerId);
+        }
+        return;
+    }
+
     if (data.type === "offer") {
         startLocalStream(false).then(() => createAnswer(data.sdp, data.senderId));
     }
 
-    // Answer → broadcaster gets from viewer
     if (data.type === "answer") {
         pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
     }
 
-    // ICE
     if (data.type === "candidate") {
-        pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        if (pc) pc.addIceCandidate(new RTCIceCandidate(data.candidate));
     }
 }
 
 async function startLocalStream(isBroadcaster = false) {
+    username = prompt("Enter your Name:", "User") || "Anonymous";
+
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
     const constraints = {
         video: { facingMode: cameraToggle.checked ? "user" : "environment" },
         audio: true,
@@ -332,7 +344,7 @@ async function startLocalStream(isBroadcaster = false) {
     isBroadcasting = isBroadcaster;
 
     if (isBroadcaster) {
-        send({ type: "start_broadcast" });
+        send({ type: "start_broadcast", name: username });
         broadcasterStatus.textContent = "YOU ARE BROADCASTING";
     }
 
@@ -340,34 +352,43 @@ async function startLocalStream(isBroadcaster = false) {
 }
 
 function stopLocalStream() {
-    if (localStream) localStream.getTracks().forEach((t) => t.stop());
-    localStream = null;
+    stopBtn.disabled = true;
+    startBtn.disabled = false;
+    connectBtn.disabled = false;
 
-    if (isBroadcasting) send({ type: "stop_broadcast" });
+    if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+    }
+
+    if (isBroadcasting) {
+        send({ type: "stop_broadcast" });
+    }
 
     stopPeerConnection();
+    remoteVideo.srcObject = null;
+    remoteStatus.textContent = "Awaiting Stream...";
+
+    isBroadcasting = false;
 }
 
 function initPeerConnection() {
     pc = new RTCPeerConnection(PEER_CONFIG);
 
     if (localStream) {
-        localStream.getTracks().forEach((track) =>
-            pc.addTrack(track, localStream)
-        );
+        localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
     }
 
-    pc.ontrack = (e) => {
-        remoteVideo.srcObject = e.streams[0];
+    pc.ontrack = (event) => {
+        remoteVideo.srcObject = event.streams[0];
         remoteStatus.textContent = "";
     };
 
-    pc.onicecandidate = (e) => {
-        if (e.candidate) {
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
             send({
                 type: "candidate",
-                candidate: e.candidate,
-                targetId: isBroadcasting ? pc.viewerId : activeBroadcasterId,
+                candidate: event.candidate,
+                targetId: pc.targetId
             });
         }
     };
@@ -378,9 +399,8 @@ function stopPeerConnection() {
     pc = null;
 }
 
-// Broadcaster → makes offer for viewer
-async function createOffer(targetViewerId) {
-    pc.viewerId = targetViewerId;
+async function createOffer(viewerId) {
+    pc.targetId = viewerId;
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -388,32 +408,30 @@ async function createOffer(targetViewerId) {
     send({
         type: "offer",
         sdp: offer,
-        targetId: targetViewerId,
+        targetId: viewerId
     });
 }
 
-// Viewer → answers offer
 async function createAnswer(offer, broadcasterId) {
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    pc.targetId = broadcasterId;
 
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
     send({
         type: "answer",
         sdp: answer,
-        targetId: broadcasterId,
+        targetId: broadcasterId
     });
 }
 
-// Viewer requests connection
 function requestConnectAsViewer() {
-    send({ type: "request_offer", targetId: activeBroadcasterId });
+    send({ type: "request_offer", viewerId: userId });
 }
 
-// Init
+// INIT
 connectSignalingServer();
-
 </script>
 </body>
 </html>
