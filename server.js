@@ -17,7 +17,7 @@ app.use(express.static(__dirname));
 const users = new Map();
 
 function safeSend(ws, obj) {
-    try { ws.send(JSON.stringify(obj)); } catch (e) { /* ignore */ }
+    try { ws.send(JSON.stringify(obj)); } catch (e) { /* ignore send errors */ }
 }
 
 function broadcastToAll(obj) {
@@ -49,42 +49,34 @@ wss.on("connection", (ws) => {
     const userId = crypto.randomUUID();
     users.set(userId, { ws, name: null, profilePic: null, isBroadcasting: false });
 
-    // send assigned id (clients may keep it internally but should not display it)
+    // send assigned id (clients keep internal id but UI shows name)
     safeSend(ws, { type: "id", id: userId });
 
-    // send initial broadcaster list so client can populate UI
+    // send initial broadcaster list
     safeSend(ws, { type: "broadcaster_list", list: getBroadcasterList() });
 
     ws.on("message", (raw) => {
         let data;
-        try {
-            data = JSON.parse(raw);
-        } catch (e) {
-            return;
-        }
+        try { data = JSON.parse(raw); } catch (e) { return; }
 
         const me = users.get(userId);
         if (!me) return;
 
         switch (data.type) {
             case "set_name":
-                me.name = data.name || null;
-                // broadcast updated list and notify all of name change
+                me.name = data.name || me.name;
                 sendBroadcasterListToAll();
                 break;
 
             case "set_profile":
             case "setProfile":
-                // accept either shape
                 me.name = data.username || data.name || me.name;
                 me.profilePic = data.profilePic || data.picture || me.profilePic;
-                // inform everyone so UI updates
                 sendBroadcasterListToAll();
                 break;
 
             case "start_broadcast":
                 me.isBroadcasting = true;
-                // announce
                 broadcastToAll({
                     type: "broadcaster_started",
                     broadcasterId: userId,
@@ -92,7 +84,6 @@ wss.on("connection", (ws) => {
                     profilePic: me.profilePic || null,
                     list: getBroadcasterList()
                 });
-                // send updated list
                 sendBroadcasterListToAll();
                 break;
 
@@ -107,9 +98,8 @@ wss.on("connection", (ws) => {
                 break;
 
             case "request_offer":
-                // viewer requests to connect to a specific broadcaster (targetId)
-                // payload should include: { type: "request_offer", viewerId, targetId }
                 {
+                    // viewer requests to join target broadcaster
                     const targetId = data.targetId || data.to || data.target;
                     const viewerId = userId;
                     const viewerName = me.name || "Anonymous";
@@ -129,13 +119,11 @@ wss.on("connection", (ws) => {
             case "offer":
             case "answer":
             case "candidate": {
-                // Forward these to the intended targetId
                 const targetId = data.targetId || data.to || data.target;
                 if (!targetId) break;
                 const target = users.get(targetId);
                 if (!target) break;
 
-                // include sender metadata for name-friendly UI
                 const payload = {
                     type: data.type,
                     sdp: data.sdp,
@@ -148,7 +136,6 @@ wss.on("connection", (ws) => {
             }
 
             case "logout":
-                // optional: user logs out from UI; clear profile and stop broadcast
                 me.isBroadcasting = false;
                 me.name = null;
                 me.profilePic = null;
@@ -156,24 +143,23 @@ wss.on("connection", (ws) => {
                 break;
 
             default:
-                // unknown — ignore or log
+                // ignore unknown messages
                 break;
         }
     });
 
     ws.on("close", () => {
-        const wasBroadcaster = users.get(userId)?.isBroadcasting;
+        const wasBroadcasting = users.get(userId)?.isBroadcasting;
         users.delete(userId);
 
-        if (wasBroadcaster) {
-            // notify all that a broadcaster ended
+        if (wasBroadcasting) {
             broadcastToAll({ type: "broadcaster_ended", broadcasterId: userId, list: getBroadcasterList() });
         }
         sendBroadcasterListToAll();
     });
 
     ws.on("error", () => {
-        // ignore errors; cleanup happens on close
+        // ignore
     });
 });
 

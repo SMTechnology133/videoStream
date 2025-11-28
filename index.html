@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>WebRTC Live Stream Client</title>
 
 <style>
-/* ... (your existing CSS unchanged) ... */
+/* (Your original CSS preserved; small additions at bottom) */
 body {
     font-family: georgia;
     background: linear-gradient(to right, teal, maroon);
@@ -17,7 +17,6 @@ body {
     text-align: center;
     padding: 2px;
 }
-/* rest of your CSS remains the same */
 footer, h1 {
     border: 1px solid orange;
     border-radius: 4px;
@@ -26,7 +25,6 @@ footer, h1 {
     padding: 10px;
     color: orange;
 }
-/* keep all your existing styles unchanged */
 h2 {
     border: 1px solid orange;
     border-radius: 6px;
@@ -86,11 +84,35 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     border-radius:8px;
     margin-bottom:8px;
     cursor:pointer;
-    transition: background 0.12s;
+    transition: background 0.12s, border 0.12s;
+    border:1px solid rgba(0,0,0,0.04);
 }
-.broadcaster-tile:hover { background: rgba(0,0,0,0.06); }
+.broadcaster-tile:hover { background: rgba(0,0,0,0.04); }
 .broadcaster-avatar { width:48px; height:48px; border-radius:50%; object-fit:cover; border:1px solid #ddd; }
 .broadcaster-name { font-weight:600; color:#111; }
+
+/* NEW: highlight for joined/selected tile */
+.broadcaster-tile.joined {
+    background: rgba(34,197,94,0.12); /* light green */
+    border: 1px solid rgba(34,197,94,0.28);
+}
+.broadcaster-tile .join-btn { margin-left:auto; }
+
+.user-header {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    justify-content:center;
+    margin-bottom:6px;
+}
+.user-avatar {
+    width:40px;
+    height:40px;
+    border-radius:50%;
+    object-fit:cover;
+    border: 1px solid orange;
+}
+.user-name { font-weight:700; color: white; font-size:16px; }
 </style>
 </head>
 
@@ -114,7 +136,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     <button id="saveProfileBtn">Save & Continue</button>
 </div>
 
-<p id="userIdDisplay" style="color:white;">Your: Connecting...</p>
+<!-- NEW: user header shows avatar + name only (no UUID) -->
+<div class="user-header" style="margin-top:10px;">
+    <img id="topAvatar" class="user-avatar" src="" style="display:none" alt="avatar">
+    <div id="userIdDisplay" class="user-name" style="color:white;">Your: Connecting...</div>
+</div>
+
 <p id="broadcasterStatus" style="color:yellow;">Status: Waiting for Broadcaster.</p>
 <p style="font-size:12px; margin-top:5px; color:lightcoral;">Note: P2P simulated connections.</p>
 </header>
@@ -178,21 +205,23 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 <script>
 /* ============================
-   Client-side signaling & UI
-   (updated: show names only, clickable broadcaster tiles)
-   ============================ */
+ Client-side signaling & UI
+ - shows avatar next to name at top
+ - joined tile highlights & button text changes to "Joined"
+ ============================ */
 
 const WS_URL = (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host;
 let ws = null;
 let pc = null;
 let localStream = null;
-let userId = null;        // internal id (not shown)
-let username = null;      // shown in UI
+let userId = null;        // internal id (hidden)
+let username = null;      // visible name
 let profilePic = null;
-let activeBroadcasterId = null;
+let activeBroadcasterId = null;   // tile selected
 let activeBroadcasterName = null;
+let joinedBroadcasterId = null;   // the broadcaster this client has joined as viewer
 let isBroadcasting = false;
-let queuedProfileSend = false; // if profile saved before ws open
+let queuedProfileSend = false;
 
 const localVideo = document.getElementById("localVideo");
 const localPlaceholder = document.getElementById("localPlaceholder");
@@ -209,7 +238,7 @@ const broadcasterStatus = document.getElementById("broadcasterStatus");
 
 const broadcasterListEl = document.getElementById("broadcasterList");
 const changeProfileBtn = document.getElementById("changeProfileBtn");
-let broadcasterDropdownVisible = false;
+const topAvatar = document.getElementById("topAvatar");
 
 const PEER_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
@@ -229,16 +258,32 @@ window.onload = () => {
         username = savedName;
         profilePic = savedPic;
         document.getElementById("loginScreen").style.display = "none";
-
         localVideo.style.display = "none";
         localPlaceholder.src = profilePic;
         localPlaceholder.style.display = "block";
-
         changeProfileBtn.style.display = "inline-block";
         queuedProfileSend = true;
+        // reflect immediately at top
+        showTopProfile();
     }
 };
 
+function showTopProfile() {
+    if (username) {
+        userIdDisplay.textContent = username;
+        if (profilePic) {
+            topAvatar.src = profilePic;
+            topAvatar.style.display = "inline-block";
+        } else {
+            topAvatar.style.display = "none";
+        }
+    } else {
+        userIdDisplay.textContent = "You (not logged in)";
+        topAvatar.style.display = "none";
+    }
+}
+
+/* preview profile image */
 document.getElementById("profilePicInput").addEventListener("change", function() {
     const file = this.files[0];
     if (!file) return;
@@ -250,6 +295,7 @@ document.getElementById("profilePicInput").addEventListener("change", function()
     reader.readAsDataURL(file);
 });
 
+/* save profile */
 document.getElementById("saveProfileBtn").addEventListener("click", () => {
     const nameInput = document.getElementById("usernameInput").value.trim();
     const picSrc = document.getElementById("previewPic").src;
@@ -268,6 +314,8 @@ document.getElementById("saveProfileBtn").addEventListener("click", () => {
     localPlaceholder.src = profilePic;
     localPlaceholder.style.display = "block";
     changeProfileBtn.style.display = "inline-block";
+
+    showTopProfile();
 
     if (ws && ws.readyState === WebSocket.OPEN) {
         sendProfileToServer();
@@ -290,6 +338,9 @@ changeProfileBtn.addEventListener("click", () => {
     document.getElementById("loginScreen").style.display = "block";
     changeProfileBtn.style.display = "none";
 
+    topAvatar.style.display = "none";
+    userIdDisplay.textContent = "You (not logged in)";
+
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "logout" }));
         ws.send(JSON.stringify({ type: "set_name", name: null }));
@@ -301,80 +352,107 @@ function sendProfileToServer() {
     if (!username) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "setProfile", username: username, profilePic: profilePic }));
-        // also support older server handlers
         ws.send(JSON.stringify({ type: "set_name", name: username }));
         queuedProfileSend = false;
-
-        // show username only in UI
-        userIdDisplay.textContent = username;
+        showTopProfile();
         log("Profile sent: " + username);
     } else {
         queuedProfileSend = true;
     }
 }
 
-/* ---------------- BROADCASTER DROPDOWN (grid) ---------------- */
+/* ---------------- BROADCASTER GRID ---------------- */
 function toggleBroadcasterList() {
-    broadcasterDropdownVisible = !broadcasterDropdownVisible;
-    broadcasterListEl.style.display = broadcasterDropdownVisible ? "block" : "none";
+    broadcasterListEl.style.display = broadcasterListEl.style.display === "none" ? "block" : "none";
+}
+
+function clearBroadcasterList() {
+    broadcasterListEl.innerHTML = "<h4>Available Broadcasters:</h4>";
 }
 
 function updateBroadcasterDropdown(list) {
-    // normalize
     const items = Array.isArray(list) ? list : (list && list.list) ? list.list : [];
-    broadcasterListEl.innerHTML = "<h4>Available Broadcasters:</h4>";
+    clearBroadcasterList();
     if (!items || items.length === 0) {
         broadcasterListEl.innerHTML += "<p>No broadcasters online.</p>";
         connectBtn.disabled = true;
         return;
     }
 
-    connectBtn.disabled = true; // require selection
+    connectBtn.disabled = true; // re-enable after selection
 
     items.forEach(b => {
+        // create tile
         const entry = document.createElement("div");
         entry.className = "broadcaster-tile";
+        entry.dataset.id = b.id;
 
+        // avatar
         const img = document.createElement("img");
         img.className = "broadcaster-avatar";
         img.src = b.profilePic || "";
         img.alt = b.name || "Anon";
 
+        // name
         const nameDiv = document.createElement("div");
         nameDiv.className = "broadcaster-name";
-        nameDiv.textContent = b.name || ("User");
+        nameDiv.textContent = b.name || "User";
 
+        // join button
         const joinBtn = document.createElement("button");
-        joinBtn.className = "btn-blue";
-        joinBtn.textContent = "Join";
-        joinBtn.style.marginLeft = "auto";
+        joinBtn.className = "btn-blue join-btn";
+        joinBtn.textContent = (joinedBroadcasterId === b.id) ? "Joined" : "Join";
+        if (joinedBroadcasterId === b.id) {
+            entry.classList.add("joined");
+            joinBtn.disabled = true;
+        }
 
-        // tile click selects broadcaster
-        function selectBroadcaster() {
+        // helper to mark tile joined/selected properly
+        function markJoinedTile(id) {
+            // clear previous highlights
+            const tiles = broadcasterListEl.querySelectorAll(".broadcaster-tile");
+            tiles.forEach(t => {
+                if (t.dataset.id === id) {
+                    t.classList.add("joined");
+                    const btn = t.querySelector(".join-btn");
+                    if (btn) { btn.textContent = "Joined"; btn.disabled = true; }
+                } else {
+                    t.classList.remove("joined");
+                    const btn = t.querySelector(".join-btn");
+                    if (btn) { btn.textContent = "Join"; btn.disabled = false; }
+                }
+            });
+        }
+
+        // click behavior : select and request connect immediately (Option C)
+        entry.addEventListener("click", (ev) => {
+            ev.stopPropagation();
             activeBroadcasterId = b.id;
-            activeBroadcasterName = b.name || "Unknown";
+            activeBroadcasterName = b.name || "Broadcaster";
+            markJoinedTile(b.id); // visually select
+            // set joined id so client knows it's joined (will remain until leave)
+            joinedBroadcasterId = b.id;
             connectBtn.disabled = false;
             broadcasterStatus.textContent = "Selected Broadcaster: " + activeBroadcasterName;
-        }
+            // request connection to that broadcaster (viewer flow)
+            requestConnectAsViewer(); // uses activeBroadcasterId
+        });
+
+        // joinBtn explicit action
+        joinBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            activeBroadcasterId = b.id;
+            activeBroadcasterName = b.name || "Broadcaster";
+            markJoinedTile(b.id);
+            joinedBroadcasterId = b.id;
+            connectBtn.disabled = false;
+            broadcasterStatus.textContent = "Selected Broadcaster: " + activeBroadcasterName;
+            requestConnectAsViewer();
+        });
 
         entry.appendChild(img);
         entry.appendChild(nameDiv);
         entry.appendChild(joinBtn);
-
-        // clicking anywhere selects + triggers immediate join
-        entry.addEventListener("click", () => {
-            selectBroadcaster();
-            // automatically request connect
-            requestConnectAsViewer();
-        });
-
-        // join button explicit action (also selects)
-        joinBtn.addEventListener("click", (ev) => {
-            ev.stopPropagation();
-            selectBroadcaster();
-            requestConnectAsViewer();
-        });
-
         broadcasterListEl.appendChild(entry);
     });
 }
@@ -392,12 +470,11 @@ function connectSignalingServer() {
         let data;
         try { data = JSON.parse(msg.data); } catch (e) { return; }
 
-        // server assigned internal id (do not show cryptic id to user)
+        // assigned id (internal only)
         if (data.type === "id") {
             userId = data.id;
-            // show username only if set
-            if (username) userIdDisplay.textContent = username;
-            else userIdDisplay.textContent = "You (not logged in)";
+            // show display name (no UUID)
+            showTopProfile();
             return;
         }
 
@@ -407,33 +484,32 @@ function connectSignalingServer() {
         }
 
         if (data.type === "broadcaster_started") {
-            // update UI with name (no UUID shown)
-            activeBroadcasterId = data.broadcasterId;
-            activeBroadcasterName = data.broadcasterName || data.name || "Broadcaster";
-            broadcasterStatus.textContent = "Broadcaster Online: " + activeBroadcasterName;
+            // someone started broadcasting
+            // show their name in status (no UUID)
+            broadcasterStatus.textContent = "Broadcaster Online: " + (data.broadcasterName || data.name || "Broadcaster");
             if (data.list) updateBroadcasterDropdown(data.list);
             return;
         }
 
         if (data.type === "broadcaster_ended") {
-            activeBroadcasterId = null;
-            activeBroadcasterName = null;
+            if (data.list) updateBroadcasterDropdown(data.list);
             broadcasterStatus.textContent = "No active broadcaster.";
             remoteVideo.srcObject = null;
             remoteStatus.textContent = "Awaiting Stream...";
-            if (data.list) updateBroadcasterDropdown(data.list);
+            // if the broadcaster we joined ended, clear joined state
+            if (joinedBroadcasterId === data.broadcasterId) {
+                joinedBroadcasterId = null;
+                // update top UI maybe
+            }
             return;
         }
 
         if (data.type === "request_offer") {
-            // broadcaster receives this when a viewer wants to join
-            // includes viewerId and viewerName
+            // broadcaster receives request from viewer -> create offer to viewer
             if (isBroadcasting && data.viewerId) {
-                // ensure pc exists
                 if (!pc) initPeerConnection();
-                // create offer targeted to viewerId
                 createOffer(data.viewerId);
-                log("Creating offer for viewer: " + (data.viewerName || data.viewerId));
+                log("Creating offer for viewer: " + (data.viewerName || "viewer"));
             }
             return;
         }
@@ -443,6 +519,7 @@ function connectSignalingServer() {
             const fromId = data.senderId;
             const fromName = data.senderName || "Broadcaster";
             log("Received offer from: " + fromName);
+            // ensure local stream exists (viewer may not have camera)
             startLocalStream(false).then(() => createAnswer(data.sdp, fromId));
             return;
         }
@@ -462,12 +539,11 @@ function connectSignalingServer() {
             return;
         }
 
-        // unknown message
         log("Unknown message: " + JSON.stringify(data));
     };
 
     ws.onclose = () => {
-        log("Disconnected from signaling server - retrying...");
+        log("Disconnected - retrying...");
         setTimeout(connectSignalingServer, 1500);
     };
 
@@ -490,7 +566,7 @@ async function startLocalStream(isBroadcaster = false) {
         localVideo.style.display = "block";
         localPlaceholder.style.display = "none";
     } catch (err) {
-        console.warn("Camera not available, showing profile picture.");
+        console.warn("Camera not available, using profile picture placeholder.");
         localVideo.style.display = "none";
         localPlaceholder.src = profilePic || "";
         localPlaceholder.style.display = "block";
@@ -571,12 +647,34 @@ async function createAnswer(offer, broadcasterId) {
 }
 
 function requestConnectAsViewer() {
-    // require a selected broadcaster tile (activeBroadcasterId)
+    // use the currently selected activeBroadcasterId
     const targetId = activeBroadcasterId;
     const targetName = activeBroadcasterName || "Selected Broadcaster";
     if (!targetId) return alert("No broadcaster selected. Use 'Show Broadcasters' and pick one.");
+    if (!username) {
+        // better UX: ask user to set profile first
+        return alert("Please set your name & profile picture first.");
+    }
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "request_offer", targetId, viewerId: userId }));
+        // include viewerName so broadcaster gets friendly label
+        ws.send(JSON.stringify({ type: "request_offer", targetId, viewerId: userId, viewerName: username }));
+        // mark joined state (visual)
+        joinedBroadcasterId = targetId;
+        // update UI tiles (make sure clicked tile shows Joined)
+        // delay small to allow server broadcaster_list update if necessary
+        setTimeout(() => {
+            const tiles = broadcasterListEl.querySelectorAll(".broadcaster-tile");
+            tiles.forEach(t => {
+                const btn = t.querySelector(".join-btn");
+                if (t.dataset.id === targetId) {
+                    t.classList.add("joined");
+                    if (btn) { btn.textContent = "Joined"; btn.disabled = true; }
+                } else {
+                    t.classList.remove("joined");
+                    if (btn) { btn.textContent = "Join"; btn.disabled = false; }
+                }
+            });
+        }, 150);
         log("Requested connection to broadcaster: " + targetName);
     } else {
         alert("Signaling connection not open.");
